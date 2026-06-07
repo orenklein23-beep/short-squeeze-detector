@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Short Squeeze Detector</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #080b12; color: #e2e8f0; font-family: 'Courier New', monospace; min-height: 100vh; }
+    header { background: #0d1117; border-bottom: 1px solid #1e2d3d; padding: 1.5rem 2rem; display: flex; align-items: center; justify-content: space-between; }
+    header h1 { font-size: 1.4rem; color: #f97316; letter-spacing: 0.15em; text-transform: uppercase; }
+    header p { color: #475569; font-size: 0.75rem; margin-top: 0.25rem; }
+    #scan-btn { background: #f97316; color: #080b12; border: none; padding: 0.6rem 1.6rem; font-family: 'Courier New', monospace; font-weight: bold; font-size: 0.85rem; letter-spacing: 0.1em; cursor: pointer; text-transform: uppercase; transition: all 0.2s; }
+    #scan-btn:hover { background: #fb923c; }
+    #scan-btn:disabled { background: #1e293b; color: #475569; cursor: not-allowed; }
+    .top-bar { background: #0d1117; border-bottom: 1px solid #1e2d3d; padding: 1rem 2rem; display: flex; gap: 2rem; align-items: center; flex-wrap: wrap; }
+    .stat-pill { display: flex; flex-direction: column; gap: 2px; }
+    .stat-pill span:first-child { font-size: 0.65rem; color: #475569; letter-spacing: 0.1em; text-transform: uppercase; }
+    .stat-pill span:last-child { font-size: 1.1rem; font-weight: bold; color: #f8fafc; }
+    .stat-pill span.orange { color: #f97316; }
+    .stat-pill span.green { color: #4ade80; }
+    .stat-pill span.yellow { color: #facc15; }
+    #status-bar { padding: 0.5rem 2rem; font-size: 0.75rem; color: #475569; background: #080b12; min-height: 2rem; display: flex; align-items: center; gap: 0.5rem; }
+    .spinner { width: 10px; height: 10px; border: 2px solid #f97316; border-top-color: transparent; border-radius: 50%; animation: spin 0.7s linear infinite; display: inline-block; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .main { display: grid; grid-template-columns: 1fr 340px; gap: 0; min-height: calc(100vh - 140px); }
+    .table-section { padding: 1.5rem 2rem; overflow-x: auto; }
+    .filters { display: flex; gap: 1rem; margin-bottom: 1.2rem; flex-wrap: wrap; align-items: center; }
+    .filters label { font-size: 0.72rem; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; display: flex; align-items: center; gap: 0.5rem; }
+    .filters select, .filters input[type="range"] { background: #0d1117; border: 1px solid #1e2d3d; color: #e2e8f0; padding: 0.3rem 0.6rem; font-family: 'Courier New', monospace; font-size: 0.75rem; }
+    .filters input[type="range"] { accent-color: #f97316; width: 100px; padding: 0; border: none; }
+    #min-score-val { color: #f97316; font-weight: bold; min-width: 24px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+    thead th { text-align: left; padding: 0.5rem 0.75rem; color: #475569; font-size: 0.68rem; letter-spacing: 0.1em; text-transform: uppercase; border-bottom: 1px solid #1e2d3d; cursor: pointer; white-space: nowrap; user-select: none; }
+    thead th:hover { color: #f97316; }
+    thead th.active { color: #f97316; }
+    tbody tr { border-bottom: 1px solid #0d1117; cursor: pointer; transition: background 0.1s; }
+    tbody tr:hover { background: #0d1117; }
+    tbody tr.selected { background: #111827; border-left: 2px solid #f97316; }
+    tbody td { padding: 0.6rem 0.75rem; color: #94a3b8; white-space: nowrap; }
+    .ticker-cell { font-weight: bold; color: #f8fafc; font-size: 0.95rem; }
+    .score-wrap { display: flex; align-items: center; gap: 0.5rem; }
+    .score-bar { width: 80px; height: 4px; background: #1e2d3d; border-radius: 2px; overflow: hidden; }
+    .score-fill { height: 100%; border-radius: 2px; }
+    .score-num { font-weight: bold; color: #f8fafc; min-width: 32px; }
+    .badge { font-size: 0.68rem; padding: 2px 7px; border-radius: 2px; font-weight: bold; letter-spacing: 0.05em; }
+    .badge-squeezing { background: #431407; color: #f97316; }
+    .badge-starting { background: #1c1917; color: #facc15; }
+    .badge-watch { background: #0f2027; color: #38bdf8; }
+    .badge-none { background: #0f172a; color: #475569; }
+    .pos { color: #4ade80; }
+    .neg { color: #f87171; }
+    .neu { color: #64748b; }
+    .flag-pill { display: inline-block; font-size: 0.6rem; padding: 1px 5px; border-radius: 2px; background: #1e2d3d; color: #94a3b8; margin-right: 3px; white-space: nowrap; }
+    .flag-pill.active { background: #1a2e1a; color: #4ade80; }
+
+    /* Side panel */
+    .side-panel { background: #0d1117; border-left: 1px solid #1e2d3d; padding: 1.5rem; display: flex; flex-direction: column; gap: 1.2rem; overflow-y: auto; }
+    .side-panel .ticker-name { font-size: 1.6rem; font-weight: bold; color: #f97316; letter-spacing: 0.1em; }
+    .side-panel .price { font-size: 1rem; color: #f8fafc; margin-top: 4px; }
+    .metric-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+    .metric-box { background: #080b12; border: 1px solid #1e2d3d; padding: 0.6rem 0.75rem; border-radius: 3px; }
+    .metric-box .label { font-size: 0.62rem; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; }
+    .metric-box .value { font-size: 0.95rem; font-weight: bold; color: #f8fafc; margin-top: 2px; }
+    .breakdown-title { font-size: 0.72rem; color: #475569; text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 0.5rem; }
+    .breakdown-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.6rem; }
+    .breakdown-row .bd-label { font-size: 0.72rem; color: #64748b; flex: 1; }
+    .breakdown-bar-wrap { display: flex; align-items: center; gap: 0.5rem; }
+    .breakdown-bar { width: 70px; height: 3px; background: #1e2d3d; border-radius: 2px; overflow: hidden; }
+    .breakdown-fill { height: 100%; border-radius: 2px; }
+    .breakdown-val { font-size: 0.72rem; font-weight: bold; min-width: 24px; text-align: right; }
+    .chart-wrap { position: relative; height: 180px; }
+    #empty-panel { color: #1e2d3d; font-size: 0.8rem; text-align: center; margin-top: 4rem; line-height: 2; }
+    #landing { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 60vh; gap: 1rem; color: #1e2d3d; }
+    #landing h2 { font-size: 1rem; letter-spacing: 0.15em; text-transform: uppercase; }
+    #landing p { font-size: 0.8rem; }
+    .condition-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.4rem; }
+    .condition-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+    .condition-dot.on { background: #4ade80; }
+    .condition-dot.off { background: #1e2d3d; }
+    .condition-label { font-size: 0.72rem; color: #64748b; }
+    .condition-label.on { color: #4ade80; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>⚡ Short Squeeze Detector</h1>
+    <p>Active squeeze scanner — detects squeezes in progress</p>
+  </div>
+  <button id="scan-btn" onclick="runScan()">Run Scan</button>
+</header>
+
+<div class="top-bar" id="top-bar" style="display:none">
+  <div class="stat-pill"><span>Scanned</span><span id="stat-total">—</span></div>
+  <div class="stat-pill"><span>Squeezing</span><span id="stat-squeezing" class="orange">—</span></div>
+  <div class="stat-pill"><span>Starting</span><span id="stat-starting" class="yellow">—</span></div>
+  <div class="stat-pill"><span>Watch List</span><span id="stat-watch" class="green">—</span></div>
+  <div class="stat-pill"><span>Top Pick</span><span id="stat-top" class="orange">—</span></div>
+</div>
+
+<div id="status-bar">Ready — hit Run Scan to begin.</div>
+
+<div class="main" id="main-grid">
+  <div id="landing">
+    <h2>Short Squeeze Detector</h2>
+    <p>Click "Run Scan" to find active squeezes in progress</p>
+  </div>
+</div>
+
+<script>
+let allData = [];
+let sortKey = 'squeeze_score';
+let sortAsc = false;
+let selectedTicker = null;
+let radarChart = null;
+
+function getScoreColor(score) {
+  if (score >= 70) return '#f97316';
+  if (score >= 45) return '#facc15';
+  if (score >= 20) return '#38bdf8';
+  return '#334155';
+}
+
+function getBadgeClass(signal) {
+  if (signal.includes('Squeezing')) return 'badge-squeezing';
+  if (signal.includes('Starting')) return 'badge-starting';
+  if (signal.includes('Watch')) return 'badge-watch';
+  return 'badge-none';
+}
+
+async function runScan() {
+  const btn = document.getElementById('scan-btn');
+  const status = document.getElementById('status-bar');
+  btn.disabled = true;
+  btn.textContent = 'Scanning...';
+  status.innerHTML = '<span class="spinner"></span> Scanning market for active squeezes — please wait...';
+  document.getElementById('landing') && (document.getElementById('landing').style.display = 'none');
+  document.getElementById('top-bar').style.display = 'none';
+
+  try {
+    const res = await fetch('/api/scan');
+    allData = await res.json();
+
+    document.getElementById('main-grid').innerHTML = `
+      <div class="table-section">
+        <div class="filters">
+          <label>Min Score: <input type="range" min="0" max="80" value="0" id="min-score" step="5" oninput="applyFilter()"> <span id="min-score-val">0</span></label>
+          <label>Signal: <select id="signal-filter" onchange="applyFilter()">
+            <option value="all">All</option>
+            <option value="Squeezing">🔥 Squeezing</option>
+            <option value="Starting">⚡ Starting</option>
+            <option value="Watch">👀 Watch</option>
+          </select></label>
+          <label>Sector: <select id="sector-filter" onchange="applyFilter()"><option value="all">All Sectors</option></select></label>
+        </div>
+        <table id="results-table">
+          <thead>
+            <tr>
+              <th onclick="sortBy('ticker')">Ticker</th>
+              <th onclick="sortBy('price')">Price</th>
+              <th onclick="sortBy('short_float')">Short %</th>
+              <th onclick="sortBy('days_to_cover')">Days to Cover</th>
+              <th onclick="sortBy('volume_ratio')">Vol Spike</th>
+              <th onclick="sortBy('momentum_5d')">5D Mom</th>
+              <th onclick="sortBy('rsi')">RSI</th>
+              <th onclick="sortBy('squeeze_score')" class="active">Score ↓</th>
+              <th>Signal</th>
+              <th>Active Conditions</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+      <div class="side-panel" id="side-panel">
+        <div id="empty-panel">← Click any stock<br>to see its full<br>squeeze breakdown</div>
+      </div>
+    `;
+
+    const sectors = [...new Set(allData.map(d => d.sector).filter(s => s && s !== 'Unknown'))].sort();
+    const sectorEl = document.getElementById('sector-filter');
+    sectors.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s; opt.textContent = s;
+      sectorEl.appendChild(opt);
+    });
+
+    updateStats(allData);
+    applyFilter();
+    document.getElementById('top-bar').style.display = 'flex';
+    status.textContent = `Scan complete — ${allData.length} stocks analyzed. Click any row for details.`;
+  } catch(e) {
+    status.textContent = 'Error — make sure the Flask server is running.';
+  }
+
+  btn.disabled = false;
+  btn.textContent = 'Rescan';
+}
+
+function updateStats(data) {
+  document.getElementById('stat-total').textContent = data.length;
+  document.getElementById('stat-squeezing').textContent = data.filter(d => d.signal.includes('Squeezing')).length;
+  document.getElementById('stat-starting').textContent = data.filter(d => d.signal.includes('Starting')).length;
+  document.getElementById('stat-watch').textContent = data.filter(d => d.signal.includes('Watch')).length;
+  document.getElementById('stat-top').textContent = data.length ? data[0].ticker : '—';
+}
+
+function applyFilter() {
+  const minScore = parseInt(document.getElementById('min-score').value);
+  document.getElementById('min-score-val').textContent = minScore;
+  const signal = document.getElementById('signal-filter').value;
+  const sector = document.getElementById('sector-filter').value;
+
+  let filtered = allData.filter(d => {
+    if (d.squeeze_score < minScore) return false;
+    if (signal !== 'all' && !d.signal.includes(signal)) return false;
+    if (sector !== 'all' && d.sector !== sector) return false;
+    return true;
+  });
+
+  filtered = [...filtered].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortAsc ? av - bv : bv - av;
+  });
+
+  renderTable(filtered);
+}
+
+function sortBy(key) {
+  if (sortKey === key) sortAsc = !sortAsc;
+  else { sortKey = key; sortAsc = false; }
+  applyFilter();
+}
+
+function renderTable(data) {
+  const tbody = document.getElementById('results-body');
+  if (!data.length) {
+    tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;color:#334155;padding:2rem;">No results match your filters.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = data.map(d => {
+    const color = getScoreColor(d.squeeze_score);
+    const momClass = d.momentum_5d > 0 ? 'pos' : d.momentum_5d < 0 ? 'neg' : 'neu';
+    const rsiClass = d.rsi > 75 ? 'neg' : d.rsi < 40 ? 'pos' : 'neu';
+    const isSelected = d.ticker === selectedTicker ? 'selected' : '';
+
+    const flagsHtml = (d.flags || []).map(f =>
+      `<span class="flag-pill active">${f}</span>`
+    ).join('');
+
+    return `
+      <tr class="${isSelected}" onclick="showDetail('${d.ticker}', this)">
+        <td class="ticker-cell">${d.ticker}</td>
+        <td>$${d.price}</td>
+        <td>${d.short_float}%</td>
+        <td>${d.days_to_cover}d</td>
+        <td class="${d.volume_ratio > 1.5 ? 'pos' : 'neu'}">${d.volume_ratio}x</td>
+        <td class="${momClass}">${d.momentum_5d > 0 ? '+' : ''}${d.momentum_5d}%</td>
+        <td class="${rsiClass}">${d.rsi}</td>
+        <td>
+          <div class="score-wrap">
+            <div class="score-bar"><div class="score-fill" style="width:${d.squeeze_score}%;background:${color}"></div></div>
+            <span class="score-num" style="color:${color}">${d.squeeze_score}</span>
+          </div>
+        </td>
+        <td><span class="badge ${getBadgeClass(d.signal)}">${d.signal}</span></td>
+        <td>${flagsHtml}</td>
+      </tr>
+    `;
+  }).join('');
+}
+
+function showDetail(ticker, row) {
+  selectedTicker = ticker;
+  const d = allData.find(x => x.ticker === ticker);
+  if (!d) return;
+
+  document.querySelectorAll('tbody tr').forEach(tr => tr.classList.remove('selected'));
+  row.classList.add('selected');
+
+  const panel = document.getElementById('side-panel');
+  const color = getScoreColor(d.squeeze_score);
+  const bd = d.score_breakdown;
+
+  const breakdownConfig = [
+    { key: 'above_ma20',      label: 'Above 20MA',       max: 25, condition: d.above_ma20 },
+    { key: 'vol_surge',       label: 'Vol 3-Day Surge',  max: 20, condition: d.vol_increasing },
+    { key: 'higher_highs',    label: 'Higher Highs',     max: 20, condition: d.higher_highs },
+    { key: 'shorts_covering', label: 'Shorts Covering',  max: 15, condition: d.shorts_covering },
+    { key: 'rsi_confirming',  label: 'RSI Confirming',   max: 10, condition: d.rsi_confirming },
+    { key: 'vol_spike',       label: 'Vol Spike Today',  max: 5,  condition: d.volume_ratio > 1.5 },
+    { key: 'above_ma50',      label: 'Above 50MA',       max: 5,  condition: d.above_ma50 },
+  ];
+
+  const breakdownRows = breakdownConfig.map(item => {
+    const val = bd[item.key] || 0;
+    const pct = Math.round((val / item.max) * 100);
+    const barColor = val > 0 ? '#f97316' : '#1e2d3d';
+    const valColor = val > 0 ? '#f97316' : '#334155';
+    return `
+      <div class="breakdown-row">
+        <span class="bd-label">${item.label}</span>
+        <div class="breakdown-bar-wrap">
+          <div class="breakdown-bar"><div class="breakdown-fill" style="width:${pct}%;background:${barColor}"></div></div>
+          <span class="breakdown-val" style="color:${valColor}">${val}/${item.max}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+
+  const conditionConfig = [
+    { label: 'Price above 20MA',         on: d.above_ma20 },
+    { label: 'Price above 50MA',         on: d.above_ma50 },
+    { label: 'Higher highs structure',   on: d.higher_highs },
+    { label: 'Volume surging 3 days',    on: d.vol_increasing },
+    { label: 'Volume spike today',       on: d.volume_ratio > 1.5 },
+    { label: 'Shorts covering',          on: d.shorts_covering },
+    { label: 'RSI confirming',           on: d.rsi_confirming },
+  ];
+
+  const conditionsHtml = conditionConfig.map(c => `
+    <div class="condition-row">
+      <div class="condition-dot ${c.on ? 'on' : 'off'}"></div>
+      <span class="condition-label ${c.on ? 'on' : ''}">${c.label}</span>
+    </div>
+  `).join('');
+
+  panel.innerHTML = `
+    <div>
+      <div class="ticker-name">${d.ticker}</div>
+      <div class="price">$${d.price} &nbsp;<span class="badge ${getBadgeClass(d.signal)}">${d.signal}</span></div>
+      <div style="margin-top:0.4rem;font-size:0.7rem;color:#475569">${d.sector}</div>
+    </div>
+
+    <div style="text-align:center">
+      <div style="font-size:0.65rem;color:#475569;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:4px">Squeeze Score</div>
+      <div style="font-size:3rem;font-weight:bold;color:${color};line-height:1">${d.squeeze_score}</div>
+      <div style="font-size:0.7rem;color:#334155">/ 100</div>
+    </div>
+
+    <div class="metric-grid">
+      <div class="metric-box"><div class="label">Short Float</div><div class="value" style="color:#f97316">${d.short_float}%</div></div>
+      <div class="metric-box"><div class="label">Days to Cover</div><div class="value">${d.days_to_cover}d</div></div>
+      <div class="metric-box"><div class="label">Vol Spike</div><div class="value" style="color:${d.volume_ratio > 1.5 ? '#4ade80' : '#94a3b8'}">${d.volume_ratio}x</div></div>
+      <div class="metric-box"><div class="label">RSI</div><div class="value" style="color:${d.rsi > 75 ? '#f87171' : d.rsi < 40 ? '#4ade80' : '#f8fafc'}">${d.rsi}</div></div>
+      <div class="metric-box"><div class="label">5D Momentum</div><div class="value" style="color:${d.momentum_5d > 0 ? '#4ade80' : '#f87171'}">${d.momentum_5d > 0 ? '+' : ''}${d.momentum_5d}%</div></div>
+      <div class="metric-box"><div class="label">1M Momentum</div><div class="value" style="color:${d.momentum_1m > 0 ? '#4ade80' : '#f87171'}">${d.momentum_1m > 0 ? '+' : ''}${d.momentum_1m}%</div></div>
+      <div class="metric-box"><div class="label">Short Change</div><div class="value" style="color:${d.short_change < 0 ? '#4ade80' : '#f87171'}">${d.short_change > 0 ? '+' : ''}${d.short_change}%</div></div>
+      <div class="metric-box"><div class="label">52W Position</div><div class="value">${d.week52_position}%</div></div>
+    </div>
+
+    <div>
+      <div class="breakdown-title">Score Breakdown</div>
+      ${breakdownRows}
+    </div>
+
+    <div>
+      <div class="breakdown-title">Conditions Checklist</div>
+      ${conditionsHtml}
+    </div>
+
+    <div class="chart-wrap">
+      <canvas id="radarCanvas"></canvas>
+    </div>
+  `;
+
+  if (radarChart) radarChart.destroy();
+  radarChart = new Chart(document.getElementById('radarCanvas'), {
+    type: 'radar',
+    data: {
+      labels: ['Short Interest', 'Days to Cover', 'Vol Surge', 'Higher Highs', 'RSI', 'Covering'],
+      datasets: [{
+        data: [
+          Math.round((bd.above_ma20 / 25) * 100),
+          Math.round((bd.shorts_covering / 15) * 100),
+          Math.round((bd.vol_surge / 20) * 100),
+          Math.round((bd.higher_highs / 20) * 100),
+          Math.round((bd.rsi_confirming / 10) * 100),
+          Math.round((bd.shorts_covering / 15) * 100),
+        ],
+        backgroundColor: 'rgba(249, 115, 22, 0.15)',
+        borderColor: '#f97316',
+        borderWidth: 1.5,
+        pointBackgroundColor: '#f97316',
+        pointRadius: 3,
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        r: {
+          min: 0, max: 100,
+          ticks: { display: false },
+          grid: { color: '#1e2d3d' },
+          pointLabels: { color: '#475569', font: { size: 9, family: 'Courier New' } },
+          angleLines: { color: '#1e2d3d' }
+        }
+      }
+    }
+  });
+}
+</script>
+</body>
+</html>
