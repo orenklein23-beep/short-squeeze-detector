@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, render_template
 import yfinance as yf
 import pandas as pd
+import time
 
 app = Flask(__name__)
 
@@ -128,48 +129,38 @@ def get_squeeze_score(ticker):
         else:
             week52_position = 50.0
 
-        # -----------------------------------------------
         # ACTIVE SQUEEZE SCORE
-        # -----------------------------------------------
         score = 0
         flags = []
 
-        # 1. Price above 20MA (25 pts)
         if above_ma20:
             score += 25
             flags.append("Above 20MA")
 
-        # 2. Volume increasing 3 consecutive days (20 pts)
         if vol_increasing:
             score += 20
             flags.append("Vol 3-Day Surge")
 
-        # 3. Higher highs (20 pts)
         if higher_highs:
             score += 20
             flags.append("Higher Highs")
 
-        # 4. Shorts covering (15 pts)
         if shorts_covering:
             score += 15
             flags.append("Shorts Covering")
 
-        # 5. RSI rising and in zone (10 pts)
         if rsi_in_zone and rsi_rising:
             score += 10
             flags.append("RSI Confirming")
 
-        # 6. Volume spike today (5 pts)
         if volume_ratio > 1.5:
             score += 5
             flags.append("Vol Spike Today")
 
-        # 7. Above 50MA bonus (5 pts)
         if above_ma50:
             score += 5
             flags.append("Above 50MA")
 
-        # Penalize low short interest
         short_float_pct = round(float(short_float * 100), 2)
         if short_float_pct < 10:
             score = score * 0.5
@@ -232,10 +223,12 @@ def index():
 def scan():
     tickers = get_high_short_interest_tickers()
     results = []
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers):
         data = get_squeeze_score(ticker)
         if data:
             results.append(data)
+        if i % 10 == 0:
+            time.sleep(1)
     results.sort(key=lambda x: x["squeeze_score"], reverse=True)
     return jsonify(results)
 
